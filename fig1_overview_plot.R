@@ -24,16 +24,16 @@ meta_sub <- merge(meta_sub,
                   meta_data[, c("subject_id", "treatment", "age", "sex")], 
                   by = "subject_id", all.x = TRUE)
 
-# convert all time points to days
+# convert all time points for display
 meta_sub$time_numeric <- as.numeric(dplyr::recode(
   meta_sub$timepoint,
-  "Day1" = "1",
-  "Wk1" = "7",
-  "Wk4" = "28",
-  "Wk8" = "56",
-  "Wk12" = "84",
-  "Wk16" = "112",
-  "Wk32" = "224",
+  "Day1" = "0",
+  "Wk1" = "1",
+  "Wk4" = "4",
+  "Wk8" = "8",
+  "Wk12" = "12",
+  "Wk16" = "16",
+  "Wk32" = "32",
   .default = NA_character_
 ))
 
@@ -66,13 +66,66 @@ p <- ggplot() +
   theme_minimal() +
   labs(
     title = "Total partial Mayo score over time by treatment",
-    x = "Days",
+    x = "Week",
     y = "Total partial Mayo score",
     color = "Treatment",
     fill = "Treatment"
   )
 ggsave("fig1_time_series_overview.pdf",
         plot = p, width = 8, height = 6)
+
+# -----
+# Each subject's time series
+meta_sub$subject_id_disp <- gsub("^CP101-", "", meta_sub$subject_id)
+
+# Label positions
+label_data <- meta_sub %>%
+  group_by(subject_id_disp, treatment) %>%
+  summarise(
+    x = min(time_numeric, na.rm = TRUE),
+    y = max(total_partial_mayo, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Create an ordering factor so placebo/active alternate columns
+meta_sub <- meta_sub %>%
+  arrange(treatment, subject_id_disp) %>%
+  mutate(panel_id = forcats::fct_inorder(paste(treatment, subject_id_disp, sep = "_")))
+
+label_data <- label_data %>%
+  arrange(treatment, subject_id_disp) %>%
+  mutate(panel_id = forcats::fct_inorder(paste(treatment, subject_id_disp, sep = "_")))
+
+# Plot
+p <- ggplot(meta_sub, aes(x = time_numeric, y = total_partial_mayo, color = treatment)) +
+  geom_line(alpha = 1.0) +
+  geom_point(alpha = 1.0) +
+  geom_text(
+    data = label_data,
+    aes(x = Inf, y = Inf, label = subject_id_disp),
+    inherit.aes = FALSE,
+    hjust = 1.1,  # push slightly inside from right edge
+    vjust = 1.1,  # push slightly inside from top edge
+    size = 3,
+    color = "black"
+  ) +
+  theme_bw() +
+  facet_wrap(~ panel_id, ncol = 2) +
+  labs(
+    title = "Total partial Mayo score over time by treatment",
+    x = "Week",
+    y = "Total partial Mayo score",
+    color = "Treatment",
+    fill = "Treatment"
+  ) +
+  theme(
+    panel.spacing = unit(0.2, "lines"),
+    strip.background = element_blank(),
+    strip.text = element_blank()
+  )
+ggsave("fig1_time_series_individual_subjects.pdf",
+        plot = p, width = 4, height = 4)
+# -----
 
 
 # subject-level regression
