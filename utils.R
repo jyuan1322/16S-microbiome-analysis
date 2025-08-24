@@ -320,3 +320,119 @@ plot_asv_heatmap <- function(seqtab_filtered,
     return(gg)
 }
 
+
+
+plot_asv_heatmap2 <- function(seqtab_filtered,
+                             meta_data,
+                             min_abundance = 1,
+                             min_prevalence = 0.2,
+                             rel_abund = TRUE,
+                             cluster_rows = TRUE,
+                             cluster_cols = FALSE) {
+    library(reshape2)
+    library(ggplot2)
+    library(ComplexHeatmap)
+    library(circlize)
+    library(stringr)
+
+    # Ensure ASV IDs are columns and sample names are rownames
+    asv_table <- as.data.frame(seqtab_filtered)
+    asv_table$Sample <- rownames(asv_table)
+
+    # Filter ASVs based on prevalence
+    prevalence <- colMeans(asv_table[, !colnames(asv_table) %in% "Sample"] > min_abundance)
+    keep_asvs <- names(prevalence[prevalence >= min_prevalence])
+    filtered <- asv_table[, c(keep_asvs, "Sample"), drop = FALSE]
+    filtered$SampleSort <- gsub("Day1", "Wk0", gsub("CP101", "", filtered$Sample))
+
+    # Join with metadata
+    meta <- meta_data[match(filtered$Sample, meta_data$sample_id), ]
+
+    # Reorder samples: treatment first, then numeric order from sample name
+    if (!cluster_cols && "treatment" %in% colnames(meta)) {
+        # Extract numeric part from sample name and time point
+        all_nums <- str_extract_all(filtered$SampleSort, "\\d+")
+        sample_num <- sapply(all_nums, function(v) if(length(v) >= 1) as.numeric(v[1]) else NA)
+        time_num <- sapply(all_nums, function(v) if(length(v) >= 2) as.numeric(v[2]) else NA)
+
+        treatment_order <- order(meta$treatment, sample_num, time_num)
+        filtered <- filtered[treatment_order, ]
+        meta <- meta[treatment_order, ]
+    }
+
+    # Optionally scale to relative abundance
+    mat <- as.matrix(filtered[, keep_asvs])
+    if (rel_abund) {
+        row_totals <- rowSums(mat)
+        safe_row_totals <- ifelse(row_totals == 0, 1, row_totals)
+        mat <- sweep(mat, 1, safe_row_totals, FUN = "/")
+        mat[row_totals == 0, ] <- 0
+    }
+    rownames(mat) <- filtered$Sample
+
+    # If clustering is enabled, use ComplexHeatmap
+    if (cluster_rows || cluster_cols) {
+        col_fun <- circlize::colorRamp2(
+            breaks = c(min(mat), max(mat)),
+            colors = c("white", "red")
+        )
+
+        treatment_colors <- c("placebo" = "#1f77b4", "active" = "#ff7f0e")
+
+        bottom_annot <- HeatmapAnnotation(
+            Treatment = meta$treatment,
+            Mayo = meta$total_partial_mayo,
+            col = list(
+                Treatment = treatment_colors,
+                Mayo = circlize::colorRamp2(
+                    range(meta$total_partial_mayo, na.rm = TRUE),
+                    c("white", "darkgreen")
+                )
+            ),
+            which = "column",
+            annotation_name_side = "left",
+            annotation_legend_param = list(
+                Treatment = list(title = "Treatment"),
+                Mayo = list(title = "Mayo Score")
+            )
+        )
+
+        ht <- Heatmap(
+            t(mat),
+            name = if (rel_abund) "Rel Abundance" else "Abundance",
+            col = col_fun,
+            cluster_rows = cluster_rows,
+            cluster_columns = cluster_cols,
+            show_row_dend = cluster_rows,
+            show_column_dend = cluster_cols,
+            row_names_gp = gpar(fontsize = 6),
+            column_names_gp = gpar(fontsize = 8),
+            column_names_rot = 90,
+            heatmap_legend_param = list(direction = "horizontal"),
+            top_annotation = NULL,
+            bottom_annotation = bottom_annot
+        )
+        return(ht)
+    }
+
+    # Fallback: ggplot2 heatmap
+    df_long <- melt(filtered, id.vars = "Sample",
+                    variable.name = "ASV", value.name = "Abundance")
+
+    gg <- ggplot(df_long, aes(x = factor(Sample, levels = unique(filtered$Sample)),
+                              y = ASV, fill = Abundance)) +
+        geom_tile() +
+        scale_fill_gradient(
+            low = "white", high = "red",
+            name = if (rel_abund) "Rel Abund" else "Abundance"
+        ) +
+        scale_x_discrete(position = "top") +
+        labs(x = "Sample", y = "ASV", title = "Heatmap of ASV Abundance") +
+        theme_minimal() +
+        theme(
+            axis.text.x = element_text(angle = 90, hjust = 0),
+            axis.text.y = element_text(size = 6)
+        )
+
+    return(gg)
+}
