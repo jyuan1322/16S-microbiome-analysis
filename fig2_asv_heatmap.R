@@ -32,7 +32,7 @@ meta_sub$subject_id <- str_replace(meta_sub$subject_id,
 meta_sub <- merge(meta_sub, meta_data[, c("subject_id", "treatment")],
                   by = "subject_id", all.x = TRUE)
 
-# convert all time points to days
+# convert all time points to weeks
 meta_sub$time_numeric <- as.numeric(dplyr::recode(
   meta_sub$timepoint,
   "Day1" = "0",
@@ -45,8 +45,12 @@ meta_sub$time_numeric <- as.numeric(dplyr::recode(
   .default = NA_character_
 ))
 
+# data and figure output dirs from dada2
+dada2_data_out <- "test_data_output_v2"
+dada2_figure_out <- "test_figure_output_v2"
+
 seqtab.nochim <- readRDS(file.path(working_dir,
-                    "test_data_output", "seqtab_final.rds"))
+                    dada2_data_out, "seqtab_final.rds"))
 
 # filter for time series samples
 seqtab.filt <- seqtab.nochim[rownames(seqtab.nochim) %in%
@@ -56,7 +60,7 @@ setdiff(rownames(seqtab.nochim), rownames(seqtab.filt))
 
 # assign ASVs to taxa (family or genus)
 taxa <- read.table(
-  file.path(working_dir, "test_data_output", "taxa.csv"),
+  file.path(working_dir, dada2_data_out, "taxa.csv"),
   sep = " ",
   header = TRUE,
   stringsAsFactors = FALSE,
@@ -123,7 +127,7 @@ get_asv_id <- function(sequence) {
   return(paste(matched_row$Taxonomy, matched_row$ASV_ID, sep=" | "))
 }
 write.csv(asv_mapping,
-          file.path(working_dir, "test_data_output", "fig2_heatmap_filt_asv_mapping.csv"),
+          file.path(working_dir, dada2_data_out, "fig2_heatmap_filt_asv_mapping.csv"),
           row.names = FALSE)
 
 
@@ -196,7 +200,7 @@ ht <- plot_asv_heatmap2(
   cluster_cols = FALSE
 )
 
-pdf(file.path(working_dir, "test_figure_output", "fig2_family_heatmap.pdf"),
+pdf(file.path(working_dir, dada2_figure_out, "fig2_family_heatmap.pdf"),
     width = 12, height = 8)
 draw(ht, heatmap_legend_side = "bottom")
 dev.off()
@@ -246,7 +250,7 @@ sb <- ggplot(df_long, aes(x = Sample, y = RelAbund, fill = Family)) +
   ) +
   facet_wrap(~ subject_id, ncol = 4, scales = "free_x")
 
-pdf(file.path(working_dir, "test_figure_output", "fig2_family_top20_stacked_bars.pdf"),
+pdf(file.path(working_dir, dada2_figure_out, "fig2_family_top20_stacked_bars.pdf"),
     width = 12, height = 8)
 print(sb)
 dev.off()
@@ -298,7 +302,7 @@ ht <- plot_asv_heatmap(seqtab.filt5_ordered,
                       rel_abund = TRUE,
                       cluster_rows = TRUE,
                       cluster_cols = FALSE)
-pdf(file.path(working_dir, "test_figure_output", "fig2_common_asvs_heatmap.pdf"),
+pdf(file.path(working_dir, dada2_figure_out, "fig2_common_asvs_heatmap.pdf"),
     width = 12, height = 6)
 draw(ht, heatmap_legend_side = "bottom")
 dev.off()
@@ -319,7 +323,7 @@ if (length(missing_ids) > 0) {
 print("checking meta row order alignment")
 all(rownames(seqtab_obj) == meta_all$sample_id)
 
-taxa <- read.csv(file.path(working_dir, "test_data_output", "taxa.csv"), sep=' ')
+taxa <- read.csv(file.path(working_dir, dada2_data_out, "taxa.csv"), sep=' ')
 taxa <- as.matrix(taxa)
 # Create the taxa table for only ASVs in seqtab.filt5
 # asv_ids5 <- colnames(seqtab.filt4) # AV1, AV2
@@ -359,7 +363,7 @@ ad <- ggplot(alpha_div_merged, aes(x = time_numeric, y = Shannon, color = treatm
     axis.text.x = element_text(angle = 45, hjust = 1),
     legend.position = "bottom"
   )
-pdf(file.path(working_dir, "test_figure_output", "fig3_alpha_diversity_trend_per_subject.pdf"),
+pdf(file.path(working_dir, dada2_figure_out, "fig3_alpha_diversity_trend_per_subject.pdf"),
     width = 12, height = 8)
 print(ad)
 dev.off()
@@ -407,7 +411,7 @@ p <- ggplot(alpha_div_merged, aes(x = timepoint, y = Shannon, fill = treatment))
   ) +
   theme_minimal() +
   scale_fill_brewer(palette = "Set1")
-ggsave(file.path(working_dir, "test_figure_output", "alpha_diversity_Shannon_boxplot_vs_treatment_v1.pdf"),
+ggsave(file.path(working_dir, dada2_figure_out, "alpha_diversity_Shannon_boxplot_vs_treatment_v1.pdf"),
         plot = p, width = 8, height = 6, dpi = 300)
 
 # V2 plot (with lines connecting points per subject)
@@ -449,7 +453,7 @@ p <- ggplot(alpha_div_merged) +
   scale_fill_brewer(palette = "Set1") +
   scale_color_brewer(palette = "Set1") +
   theme_minimal()
-ggsave(file.path(working_dir, "test_figure_output", "alpha_diversity_Shannon_boxplot_vs_treatment_v2.pdf"),
+ggsave(file.path(working_dir, dada2_figure_out, "alpha_diversity_Shannon_boxplot_vs_treatment_v2.pdf"),
         plot = p, width = 8, height = 6, dpi = 300)
 
 
@@ -616,7 +620,7 @@ p <- ggplot(ord_df, aes(x = Axis.1, y = Axis.2, color = treatment, group = subje
     x = "PCoA Axis 1", y = "PCoA Axis 2",
     size = "Time", color = "Treatment"
   )
-ggsave(file.path(working_dir, "test_figure_output", "beta_diversity_timecourse.pdf"), plot=p)
+ggsave(file.path(working_dir, dada2_figure_out, "beta_diversity_timecourse.pdf"), plot=p)
 p <- ggplot(ord_df, aes(x = Axis.1, y = Axis.2, color = treatment, group = subject_id)) +
   geom_point(alpha = 0.8) +
   geom_path(alpha = 0.4) +  # connects samples from the same subject
@@ -632,7 +636,7 @@ p <- ggplot(ord_df, aes(x = Axis.1, y = Axis.2, color = treatment, group = subje
     x = "PCoA Axis 1", y = "PCoA Axis 2",
     size = "Time", color = "Treatment"
   )
-ggsave(file.path(working_dir, "test_figure_output", "beta_diversity_timecourse_nosize.pdf"), plot=p)
+ggsave(file.path(working_dir, dada2_figure_out, "beta_diversity_timecourse_nosize.pdf"), plot=p)
 
 # which taxa contribute most to Axis.2?
 # Extract taxa abundance matrix (samples x taxa)
@@ -660,14 +664,14 @@ taxa_stats <- taxa_stats %>%
   mutate(asv_id = get_asv_id(taxon)) %>%
   ungroup()
 write.csv(taxa_stats,
-          file.path(working_dir, "test_data_output", "fig3_beta_div_taxa_stats.csv"),
+          file.path(working_dir, dada2_data_out, "fig3_beta_div_taxa_stats.csv"),
           row.names = FALSE)
 
 # Filter significant taxa
 signif_taxa <- subset(taxa_stats, padj < 0.05)
 # Sort by strength of correlation
 signif_taxa <- signif_taxa[order(abs(signif_taxa$correlation), decreasing = TRUE), ]
-pdf(file.path(working_dir, "test_figure_output", "beta_div_asvs_relabund.pdf"), width = 5.5, height = 5)  # open multi-page PDF
+pdf(file.path(working_dir, dada2_figure_out, "beta_div_asvs_relabund.pdf"), width = 5.5, height = 5)  # open multi-page PDF
 for(sig_asv in as.character(signif_taxa$taxon[1:20])) {
   # asv_counts <- otu_table(ps)[, sig_asv]  # replace with your ASV ID
   # asv_counts_vec <- as.numeric(asv_counts)  # vector of counts
@@ -785,8 +789,8 @@ rownames(top_interaction) <- top_interaction$asv_id
 
 plotMA(fit, coef = "treatmentactive:time_numeric_scaled")
 
-write.csv(top_interaction, file.path(working_dir, "test_data_output", "limma_voom_interaction_results.csv"))
-saveRDS(fit, file.path(working_dir, "test_data_output", "limma_voom_fit.rds"))
+write.csv(top_interaction, file.path(working_dir, dada2_data_out, "limma_voom_interaction_results.csv"))
+saveRDS(fit, file.path(working_dir, dada2_data_out, "limma_voom_fit.rds"))
 
 # get top 50 DE ASVs for plotting with heatmap
 # Force all columns to basic atomic vectors (even if nested Rle or lists)
@@ -831,7 +835,7 @@ ht <- plot_asv_heatmap(seqtab.filt6_ordered,
                     rel_abund = TRUE,
                     cluster_rows = TRUE,
                     cluster_cols = FALSE)
-pdf(file.path(working_dir, "test_figure_output", "fig2_DE_asvs_heatmap.pdf"),
+pdf(file.path(working_dir, dada2_figure_out, "fig2_DE_asvs_heatmap.pdf"),
     width = 12, height = 6)
 draw(ht, heatmap_legend_side = "bottom")
 dev.off()
@@ -958,7 +962,7 @@ ht <- plot_asv_heatmap2(seqtab.filt2.sig,
                     rel_abund = TRUE,
                     cluster_rows = TRUE,
                     cluster_cols = FALSE)
-pdf(file.path(working_dir, "test_figure_output", "fig5_deseq2_pairedtime_sig_asvs.pdf"),
+pdf(file.path(working_dir, dada2_figure_out, "fig5_deseq2_pairedtime_sig_asvs.pdf"),
     width = 12, height = 8)
 draw(ht, heatmap_legend_side = "bottom")
 dev.off()
