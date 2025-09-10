@@ -8,6 +8,7 @@ library(vegan)
 library(reshape2)
 library(pheatmap)
 library(ggpubr)
+library(ggrepel)
 
 source("utils.R")
 
@@ -84,19 +85,113 @@ seqtab.filt2 <- seqtab.filt[, colnames(seqtab.filt) %in%
 seqtab.filt2 <- seqtab.filt2[, colSums(seqtab.filt2) > 0]
 taxa_filtered <- taxa_filtered[colnames(seqtab.filt2), , drop = FALSE]
 
-# total counts per ASV (across all samples)
-asv_totals <- colSums(seqtab.filt2)
-# Filter: Keep ASVs with at least 10 reads
-seqtab.filt3 <- seqtab.filt2[, asv_totals >= 10]
 
-asv_prevalence <- colSums(seqtab.filt3 > 0)
-# Keep ASVs present in at least a % of samples
-seqtab.filt4 <- seqtab.filt3[,
-                    asv_prevalence >= 0.2 * nrow(seqtab.filt3)]
+# Convert counts to relative abundance per sample
+rel_abund <- sweep(seqtab.filt2, 1, rowSums(seqtab.filt2), FUN = "/")
+
+# Get 2nd highest relative abundance per ASV
+second_highest <- apply(rel_abund, 2, function(x) {
+  sort(x, decreasing = TRUE)[2]  # second largest value
+})
+
+# Build data frame for plotting
+df_elbow <- data.frame(
+  ASV = names(second_highest),
+  second_highest = second_highest
+) %>%
+  arrange(desc(second_highest)) %>%
+  mutate(rank = row_number())
+
+# Elbow plot
+p1 <- ggplot(df_elbow, aes(x = rank, y = second_highest)) +
+  geom_line() +
+  geom_point(size = 0.8) +
+  geom_hline(yintercept = 0.001, linetype = "dashed", color = "red") +
+  theme_bw() +
+  labs(x = "ASV Rank", y = "Second-highest relative abundance",
+       title = "Elbow plot for ASV filtering")
+ggsave("dada2_filtering_elbow_second_abund.pdf", plot = p1, width = 6, height = 4)
+p1 <- ggplot(df_elbow, aes(x = rank, y = second_highest)) +
+  geom_line() +
+  geom_point(size = 0.8) +
+  geom_hline(yintercept = 0.001, linetype = "dashed", color = "red") +
+  scale_y_log10() +
+  theme_bw() +
+  labs(x = "ASV Rank", y = "Second-highest relative abundance (log scale)",
+       title = "Elbow plot for ASV filtering")
+ggsave("dada2_filtering_elbow_second_abund_log.pdf", plot = p1, width = 6, height = 4)
+
+
+# Prevalence = number of samples with nonzero abundance
+prevalence <- colSums(seqtab.filt2 > 0)
+
+# Total abundance = sum across all samples
+total_abundance <- colSums(seqtab.filt2)
+
+# ---- Prevalence elbow plot ----
+prev_df <- data.frame(
+  ASV = colnames(seqtab.filt2),
+  prevalence = prevalence
+) %>%
+  arrange(desc(prevalence)) %>%
+  mutate(rank = row_number())
+
+p2 <- ggplot(prev_df, aes(x = rank, y = prevalence)) +
+  geom_line() +
+  geom_point(size = 0.5) +
+  theme_bw() +
+  labs(x = "ASVs (ranked)", y = "Prevalence (# samples)")
+ggsave("dada2_filtering_elbow_prev.pdf", plot = p2, width = 6, height = 4)
+
+# ---- Total abundance elbow plot ----
+abund_df <- data.frame(
+  ASV = colnames(seqtab.filt2),
+  total_abundance = total_abundance
+) %>%
+  arrange(desc(total_abundance)) %>%
+  mutate(rank = row_number())
+
+p3 <- ggplot(abund_df, aes(x = rank, y = total_abundance)) +
+  geom_line() +
+  geom_point(size = 0.5) +
+  theme_bw() +
+  labs(x = "ASVs (ranked)", y = "Total abundance (reads)")
+ggsave("dada2_filtering_elbow_total_count.pdf", plot = p3, width = 6, height = 4)
+p3 <- ggplot(abund_df, aes(x = rank, y = total_abundance)) +
+  geom_line() +
+  geom_point(size = 0.5) +
+  scale_y_log10() +   # log-scale helps spread rare ASVs
+  theme_bw() +
+  labs(x = "ASVs (ranked)", y = "Total abundance (reads)")
+ggsave("dada2_filtering_elbow_total_count_log.pdf", plot = p3, width = 6, height = 4)
+
+
+
+
+# # total counts per ASV (across all samples)
+# asv_totals <- colSums(seqtab.filt2)
+# # Filter: Keep ASVs with at least 10 reads
+# seqtab.filt3 <- seqtab.filt2[, asv_totals >= 10]
+
+# asv_prevalence <- colSums(seqtab.filt3 > 0)
+# # Keep ASVs present in at least a % of samples
+# seqtab.filt4 <- seqtab.filt3[,
+#                     asv_prevalence >= 0.2 * nrow(seqtab.filt3)]
+
+# Step 1: relative abundances per sample
+relabund <- sweep(seqtab.filt2, 1, rowSums(seqtab.filt2), FUN = "/")
+
+# Step 2: check threshold (0.0015 = 0.15%)
+pass_threshold <- colSums(relabund >= 0.001) >= 2
+
+# Step 3: filter ASVs
+seqtab.filt3 <- seqtab.filt2[, pass_threshold]
 
 # Original ASV sequences as names
-seqtab_to_use <- seqtab.filt2
+seqtab_to_use <- seqtab.filt3
 asv_seqs <- colnames(seqtab_to_use)
+
+taxa_filtered <- taxa_filtered[colnames(seqtab.filt3), , drop = FALSE]
 
 # Assign short IDs: ASV1, ASV2, ...
 asv_ids <- paste0("ASV", seq_along(asv_seqs))
@@ -166,30 +261,27 @@ family_counts <- family_counts %>%
   mutate(Total = rowSums(across(-Family))) %>%
   arrange(desc(Total))  # sort descending by total abundance
 
-# Select top 20 families
-top_families <- family_counts$Family[1:20]
+# Select top N families
+top_n <- 15
+top_families <- family_counts$Family[1:top_n]
 
-# Filter table to top families
-family_counts_top <- family_counts %>%
-  filter(Family %in% top_families)
-
-# Convert back to matrix: rows = families, columns = samples
-family_mat <- as.matrix(family_counts_top[, -1])
-rownames(family_mat) <- family_counts_top$Family
-
-# remove Total column
-family_mat <- family_mat[, -ncol(family_mat)]
+# --- Fold remaining families into "Other" ---
+family_counts_collapsed <- family_counts %>%
+  mutate(Family = ifelse(Family %in% top_families, Family, "Other"))
 
 
-# ht <- plot_asv_heatmap(
-#   t(family_mat),
-#   meta_sub,
-#   min_abundance = 0,
-#   min_prevalence = 0,
-#   rel_abund = TRUE,
-#   cluster_rows = TRUE,
-#   cluster_cols = FALSE
-# )
+# --- Sum counts per family, including "Other" ---
+family_counts_collapsed_summed <- family_counts_collapsed %>%
+  group_by(Family) %>%
+  summarise(across(where(is.numeric), sum)) %>%  # sum all samples for duplicates (i.e., "Other")
+  ungroup()
+
+# --- Convert to matrix: rows = families, columns = samples ---
+family_mat <- as.matrix(family_counts_collapsed_summed %>%
+                           select(-Family, -Total))   # remove both Family and Total
+rownames(family_mat) <- family_counts_collapsed_summed$Family
+
+# --- Plot heatmap ---
 ht <- plot_asv_heatmap2(
   t(family_mat),
   meta_sub,
@@ -199,7 +291,6 @@ ht <- plot_asv_heatmap2(
   cluster_rows = TRUE,
   cluster_cols = FALSE
 )
-
 pdf(file.path(working_dir, dada2_figure_out, "fig2_family_heatmap.pdf"),
     width = 12, height = 8)
 draw(ht, heatmap_legend_side = "bottom")
@@ -208,11 +299,8 @@ dev.off()
 
 
 # stacked bar plots of family composition
-
-
-# Prepare data: filter top families and reshape
-df_long <- family_counts %>%
-  filter(Family %in% top_families) %>%
+# --- Reshape for plotting ---
+df_long <- family_counts_collapsed %>%
   select(-Total) %>%
   pivot_longer(-Family, names_to = "Sample", values_to = "Abundance") %>%
   # Join metadata for subject info
@@ -220,37 +308,52 @@ df_long <- family_counts %>%
   # Compute relative abundance per sample
   group_by(Sample) %>%
   mutate(RelAbund = Abundance / sum(Abundance)) %>%
-  ungroup()
-
-# --- Extract last numeric value from sample names ---
-df_long <- df_long %>%
+  ungroup() %>%
+  # --- Extract last numeric value from sample names ---
   mutate(
     last_num = sapply(str_extract_all(Sample, "\\d+"), function(x) as.numeric(tail(x, 1))),
-    # Convert DayX to weeks (optional)
     time_num = ifelse(str_detect(Sample, "(?i)^Day\\d+"),
-                      last_num / 7,   # Day7 -> 1 week
-                      last_num)
-  )
-
-# --- Reorder samples within each subject by time_num ---
-df_long <- df_long %>%
+                      last_num / 7,
+                      last_num),
+    Time = str_replace(Sample, "^CP\\d+\\d+", "")
+  ) %>%
+  # --- Reorder samples within each subject by time_num ---
   group_by(subject_id) %>%
   mutate(Sample = factor(Sample, levels = unique(Sample[order(time_num)]))) %>%
+  mutate(Time = factor(Time, levels = c("Day1", "Wk1", "Wk4", "Wk8", "Wk12", "Wk16"))) %>%
   ungroup()
+# --- Extract time point ---
+# df_long <- df_long %>%
+#   mutate(Time = str_replace(Sample, "^CP\\d+\\d+", ""))
+
+# Compute total abundance per Family
+family_totals <- df_long %>%
+  group_by(Family) %>%
+  summarise(total_abund = sum(Abundance), .groups = "drop")
+# Order families by descending total abundance, exclude "Other"
+ordered_families <- family_totals %>%
+  filter(Family != "Other") %>%
+  arrange(desc(total_abund)) %>%
+  pull(Family)
+# Add "Other" to the end
+ordered_families <- c(ordered_families, "Other")
+# Convert Family into factor with this order
+df_long$Family <- factor(df_long$Family, levels = ordered_families)
 
 # --- Plot faceted stacked barplots ---
-sb <- ggplot(df_long, aes(x = Sample, y = RelAbund, fill = Family)) +
+sb <- ggplot(df_long, aes(x = Time, y = RelAbund, fill = Family)) +
   geom_bar(stat = "identity") +
-  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
-  labs(x = "Sample", y = "Relative abundance", fill = "Family") +
+  scale_y_continuous(labels = percent_format(accuracy = 1)) +
+  labs(x = "Time", y = "Relative abundance", fill = "Family") +
   theme_minimal() +
   theme(
     axis.text.x = element_text(angle = 45, hjust = 1),
     panel.grid.major.x = element_blank()
   ) +
-  facet_wrap(~ subject_id, ncol = 4, scales = "free_x")
+  facet_wrap(~ subject_id, ncol = 4, scales = "free_x") +
+  scale_fill_viridis_d(option = "turbo")
 
-pdf(file.path(working_dir, dada2_figure_out, "fig2_family_top20_stacked_bars.pdf"),
+pdf(file.path(working_dir, dada2_figure_out, "fig2_family_top15_stacked_bars.pdf"),
     width = 12, height = 8)
 print(sb)
 dev.off()
@@ -312,7 +415,8 @@ dev.off()
 # ---------- Alpha Diversity Analysis ----------
 # Alpha diversity using filtered ASVs (seqtab.filt3)
 # seqtab.filt2 has only removal of unassigned ASVs (no read count or prevalence filtering)
-seqtab_obj <- seqtab.filt2
+# seqtab_obj <- seqtab.filt2
+seqtab_obj <- seqtab.filt3
 sample_order <- rownames(seqtab_obj)
 meta_all <- meta_sub[match(sample_order, meta_sub$sample_id), ]
 rownames(meta_all) <- meta_all$sample_id
@@ -394,11 +498,67 @@ ggplot(alpha_diff %>% filter(time_numeric != 0),
   labs(x = "Time (weeks)", y = "Change in Shannon Diversity", color = "Treatment") +
   theme_minimal()
 
+# ----- pairwise alpha-diversity plot -----
+library(cowplot)
+
+# Ensure time points are numeric and ordered
+time_points <- sort(unique(alpha_div_merged$time_numeric))
+
+# Store plots in a list
+plots <- list()
+
+# Loop over successive pairs
+for (i in 1:(length(time_points)-1)) {
+  
+  t1 <- time_points[i]
+  t2 <- time_points[i+1]
+  
+  # Subset to just the two time points
+  df_pair <- alpha_div_merged %>%
+    filter(time_numeric %in% c(t1, t2))
+  
+  # Compute treatment averages
+  avg_df <- df_pair %>%
+    group_by(treatment, time_numeric) %>%
+    summarize(mean_Shannon = mean(Shannon, na.rm = TRUE), .groups = "drop")
+  
+  time_labels <- unique(df_pair$timepoint[df_pair$time_numeric %in% c(t1, t2)])
+
+  # Create plot
+  p <- ggplot(df_pair, aes(x = time_numeric, y = Shannon, group = subject_id, color = treatment)) +
+    geom_line(alpha = 0.6) +
+    geom_point(size = 2) +
+    # Add labels for each point
+    # geom_text_repel(aes(label = subject_id),
+    #                 size = 3,
+    #                 max.overlaps = Inf,  # ensures all labels try to be drawn
+    #                 show.legend = FALSE) +
+    # Mean lines
+    geom_line(data = avg_df, aes(x = time_numeric, y = mean_Shannon, 
+                                 group = treatment, color = treatment),
+              size = 1.2) +
+    scale_x_continuous(breaks = c(t1, t2), labels = time_labels) +
+    labs(title = paste0("Time pair: ", df_pair$timepoint[df_pair$time_numeric==t1][1],
+                        " -> ", df_pair$timepoint[df_pair$time_numeric==t2][1]),
+         x = "Time", y = "Shannon diversity") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  
+  # Store plot
+  plots[[i]] <- p
+  
+  # Optional: print immediately
+  print(p)
+}
 
 
 
+# Combine plots in a grid
+combined_plot <- plot_grid(plotlist = plots, nrow=1)
+ggsave(file.path(working_dir, dada2_figure_out, "alpha_diversity_Shannon_pairwise_wilcox_vis.pdf"),
+        plot = combined_plot, width = 16, height = 4, dpi = 300)
 
-
+# ----- -----
 
 # V1 plot
 p <- ggplot(alpha_div_merged, aes(x = timepoint, y = Shannon, fill = treatment)) +
@@ -413,6 +573,39 @@ p <- ggplot(alpha_div_merged, aes(x = timepoint, y = Shannon, fill = treatment))
   scale_fill_brewer(palette = "Set1")
 ggsave(file.path(working_dir, dada2_figure_out, "alpha_diversity_Shannon_boxplot_vs_treatment_v1.pdf"),
         plot = p, width = 8, height = 6, dpi = 300)
+
+
+# 9/4/2025
+# very simple test: is the alpha diversity different between treatment groups at each time point?
+result_alpha_per_time <- alpha_div_merged %>%
+  group_by(timepoint) %>%
+  summarise(
+    test = list(
+      broom::tidy(
+        wilcox.test(Shannon ~ treatment, data = cur_data())
+      )
+    ),
+    .groups = "drop"
+  ) %>%
+  tidyr::unnest(test)
+
+result_alpha_per_time
+
+# # A tibble: 6 × 5
+#   timepoint statistic p.value method                       alternative
+#   <fct>         <dbl>   <dbl> <chr>                        <chr>      
+# 1 Day1             26   0.867 Wilcoxon rank sum exact test two.sided  
+# 2 Wk1              42   0.328 Wilcoxon rank sum exact test two.sided  
+# 3 Wk4              12   1     Wilcoxon rank sum exact test two.sided  
+# 4 Wk8              14   1     Wilcoxon rank sum exact test two.sided  
+# 5 Wk12             16   0.788 Wilcoxon rank sum exact test two.sided  
+# 6 Wk16             17   0.183 Wilcoxon rank sum exact test two.sided
+# the statistic is the sum of the ranks in the first group (active)
+
+# > table(alpha_div_merged$timepoint)
+# Day1  Wk1  Wk4  Wk8 Wk12 Wk16 Wk32 
+#   15   16   10   11   11   10    0
+
 
 # V2 plot (with lines connecting points per subject)
 # Ensure timepoint is a factor in the correct order
@@ -848,24 +1041,27 @@ dev.off()
 
 
 # Alternate: run DESeq2 pairwise
+library(DESeq2)
+library(apeglm)
 
 # NOTE: for ASV mapping to work, make sure phyloseq object
-# is generated from the same as asv_mapping (seqtab.filt2)
+# is generated from the same as asv_mapping (seqtab.filt3)
 
-timepoints <- c("Wk1", "Wk4", "Wk8", "Wk12")
+timepoints <- c("Wk1", "Wk4", "Wk8", "Wk12", "Wk16")
 dds_list <- list()   # store full DESeqDataSet for each time point
 
 for(tp in timepoints) {
-  # Subset samples for baseline + current time point
-  samples_to_keep <- sample_data(ps)$timepoint %in% c("Day1", tp)
+  # Subset samples for current time point
+  # samples_to_keep <- sample_data(ps)$timepoint %in% c("Day1", tp)
+  samples_to_keep <- sample_data(ps)$timepoint %in% c(tp)
   ps_sub <- prune_samples(samples_to_keep, ps)
 
   # Convert variables to factors
   sample_data(ps_sub)$treatment <- factor(sample_data(ps_sub)$treatment, levels = c("placebo", "active"))
-  sample_data(ps_sub)$time <- factor(sample_data(ps_sub)$timepoint, levels = c("Day1", tp))
+  # sample_data(ps_sub)$time <- factor(sample_data(ps_sub)$timepoint, levels = c("Day1", tp))
 
   # Convert to DESeq2 object
-  dds_sub <- phyloseq_to_deseq2(ps_sub, ~ treatment * time)
+  dds_sub <- phyloseq_to_deseq2(ps_sub, ~ treatment)
 
   # Run DESeq
   dds_sub <- DESeq(dds_sub)
@@ -876,7 +1072,7 @@ for(tp in timepoints) {
 
 
 library(ggrepel)
-output_dir <- "deseq2_results"
+output_dir <- "deseq2_results_v3"
 dir.create(output_dir, showWarnings = FALSE)
 
 for(tp in names(dds_list)) {
@@ -950,19 +1146,245 @@ sig_asvs_list <- lapply(dds_list, function(res) {
 })
 all_sig_asvs <- unique(unlist(sig_asvs_list))
 
+# Flatten list to a vector of all significant ASVs across comparisons
+all_sig_asvs_flat <- unlist(sig_asvs_list)
+# Count occurrences per ASV
+asv_counts <- table(all_sig_asvs_flat)
+# Keep ASVs that appear in at least 2 comparisons
+all_sig_asvs_2plus <- names(asv_counts[asv_counts >= 2])
 
 # sapply(all_sig_asvs, get_asv_id, USE.NAMES = FALSE)
-seqtab.filt2.sig <- seqtab.filt2[, all_sig_asvs]
-colnames(seqtab.filt2.sig) <-
-  sapply(colnames(seqtab.filt2.sig), get_asv_id, USE.NAMES = FALSE)
-ht <- plot_asv_heatmap2(seqtab.filt2.sig,
+seqtab.filt3.sig <- seqtab.filt3[, all_sig_asvs_2plus]
+colnames(seqtab.filt3.sig) <-
+  sapply(colnames(seqtab.filt3.sig), get_asv_id, USE.NAMES = FALSE)
+ht <- plot_asv_heatmap2(seqtab.filt3.sig,
                     meta_sub,
                     min_abundance = 0,
                     min_prevalence = 0,
                     rel_abund = TRUE,
                     cluster_rows = TRUE,
                     cluster_cols = FALSE)
-pdf(file.path(working_dir, dada2_figure_out, "fig5_deseq2_pairedtime_sig_asvs.pdf"),
+pdf(file.path(working_dir, dada2_figure_out, "fig5_deseq2_pairedtime_sig_asvs_2plus.pdf"),
     width = 12, height = 8)
 draw(ht, heatmap_legend_side = "bottom")
 dev.off()
+
+
+
+
+# visualize across time points
+res_all <- c()
+for(tp in names(dds_list)) {
+  dds_sub <- dds_list[[tp]]
+
+  # Extract results
+  res_df <- as.data.frame(results(dds_sub))
+  res_df$comparison <- tp
+  res_df$ASV <- rownames(res_df)  # keep the ASV IDs
+  res_df$ASV_label <- sapply(res_df$ASV, get_asv_id, USE.NAMES = FALSE)
+  res_all <- rbind(res_all, res_df)
+}
+rownames(res_all) <- NULL
+res_all$ASV <- NULL
+
+write.csv(res_all, 
+          "deseq2_res_all.csv", row.names = FALSE)
+
+
+res_all_sig <- res_all[!is.na(res_all$padj) & res_all$padj < 0.05, ]
+asv_label_set <- unique(res_all_sig$ASV_label)
+res_all_disp <- res_all[res_all$ASV_label %in% asv_label_set, ]
+res_all_disp$padj[is.na(res_all_disp$padj)] <- 1
+res_all_disp$nlog10padj <- -log10(res_all_disp$padj)
+
+# First, add columns for color (sign) and border (significance)
+res_all_disp <- res_all_disp %>%
+  mutate(
+    sign = ifelse(log2FoldChange > 0, "up", "down"),
+    sig_border = ifelse(padj < 0.05, "significant", "ns")
+  )
+res_all_disp$comparison <- factor(res_all_disp$comparison, levels = c("Day1", "Wk1", "Wk4", "Wk8", "Wk12", "Wk16"))
+
+asv_mat <- res_all_disp %>%
+  select(ASV_label, comparison, log2FoldChange) %>%
+  pivot_wider(
+    names_from = comparison,
+    values_from = log2FoldChange,
+    values_fill = 0
+  )
+# Compute distance and clustering using the matrix without row names
+asv_values <- asv_mat %>% select(-ASV_label)
+dist_mat <- dist(as.matrix(asv_values))
+hc <- hclust(dist_mat, method = "complete")
+asv_order <- asv_mat$ASV_label[hc$order]
+
+res_all_disp$ASV_label <- factor(res_all_disp$ASV_label, levels = asv_order)
+
+# Dotplot
+p <- ggplot(res_all_disp, aes(
+  x = comparison,
+  y = ASV_label,
+  size = nlog10padj,   # size by magnitude of fold change
+  fill = log2FoldChange,
+  stroke = ifelse(sig_border == "significant", 1.5, 0)  # border thickness
+)) +
+  geom_point(shape = 21) +   # shape 21 allows border color & stroke
+  scale_size_continuous(range = c(2, 6)) +
+  scale_fill_gradient2(
+    low = "blue", mid = "white", high = "red",
+    midpoint = 0,   # 0 fold change = neutral
+    name = "log2FC"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.text.y = element_text(size = 6)
+  ) +
+  labs(
+    x = "Time point",
+    y = "ASV",
+    color = "Direction",
+    size = "-log10 padj"
+  )
+ggsave("dada2_deseq2_dotplot.pdf", plot = p, width = 6, height = 10)
+
+
+
+
+
+# investigating extremely high fold changes
+# Prevotellaceae_Prevotellaceae UCG-001_NA | ASV264
+asv_str <- "TACGGAAGGTCCGGGCGTTATCCGGATTTATTGGGTTTAAAGGGAGCGCAGGCCGCCGTGCAAGCGTGCCGTGAAAAGCAGCGGCCCAACCGCTGCCCTGCGGCGCGAACTGCTTGGCTTGAGTGCGCCGGAAGCGGGCGGAATTCGTGGTGTAGCGGTGAAATGCTTAGATATCACGAAGAACCCCGATTGCGAAGGCAGCCCGCTGTGGCGCCACTGACGCTGAGGCTCGAAGGTGCGGGTATCGAACAGG"
+temp <- seqtab.filt3[, asv_str]
+print(temp[temp > 0])
+
+
+# the significant asvs are significant due to extreme sparsity
+# either:
+# --- run DESeq2 but more aggressively filtering out sparse ASVs
+# --- run a Fisher exact test (treatment vs no treatment) x (time 0 vs time t) (but this might be too simple, i.e. there's no reads in 1,1)
+
+# Pick abundance threshold (e.g. 0.1% relative abundance)
+threshold <- 0.001  
+
+# Convert to relative abundances
+rel <- sweep(seqtab.filt3, 1, rowSums(seqtab.filt3), "/")
+
+# Count number of samples where ASV is above threshold
+present_counts <- colSums(rel >= threshold)
+
+# Keep ASVs present in at least 10 samples
+keep_asvs <- names(present_counts[present_counts >= 10])
+
+# Filter table
+seqtab.filt4 <- seqtab.filt3[, keep_asvs]
+
+
+
+
+
+
+# testing other models
+sample_data(ps)
+otu_table(ps)
+
+# Load packages
+# library(microbiome)   # for CLR transform
+library(caret)        # for ML workflow
+library(dplyr)
+
+# --- Example inputs ---
+# counts: rows = samples, cols = OTUs
+# metadata: rows = samples, includes column "treatment"
+counts <- otu_table(ps)
+metadata <- sample_data(ps)
+
+# 1. Add pseudocount and CLR-transform
+# counts: samples x OTUs
+counts_pseudo <- counts + 1  # add pseudocount to avoid log(0)
+# Compute CLR
+counts_clr <- t(apply(counts_pseudo, 1, function(x) {
+  log_x <- log(x)
+  log_x - mean(log_x)  # subtract geometric mean (actually mean of logs)
+}))
+
+# 2. Combine with metadata
+data_ml <- cbind(metadata[, c("subject_id", "treatment")], counts_clr)
+
+# 3. Example: split predictors (X) and response (y)
+X <- data_ml %>% select(-treatment)
+y <- data_ml$treatment
+
+# 4. Train/test split
+set.seed(123)
+train_idx <- createDataPartition(y, p = 0.8, list = FALSE)
+X_train <- X[train_idx, ]
+y_train <- factor(y[train_idx], levels = c("placebo", "active")) 
+X_test  <- X[-train_idx, ]
+y_test  <- factor(y[-train_idx], levels = c("placebo", "active"))
+
+# 5. Example model: Random Forest
+model <- train(
+  x = X_train,
+  y = y_train,
+  method = "rf",
+  trControl = trainControl(method = "cv", number = 5)
+)
+
+
+levels_y <- levels(y_train)  # all levels from training set
+
+# Convert predictions and true labels to factors with same levels
+preds <- factor(preds, levels = levels_y)
+y_test <- factor(y_test, levels = levels_y)
+
+# 6. Predict on test set
+preds <- predict(model, X_test)
+confusionMatrix(preds, y_test, positive="active")
+
+
+
+
+
+
+
+
+
+
+# In each time point, run deseq2 vs treatment
+library(DESeq2)
+library(apeglm)
+
+# NOTE: for ASV mapping to work, make sure phyloseq object
+# is generated from the same as asv_mapping (seqtab.filt3)
+
+timepoints <- c("Wk1", "Wk4", "Wk8", "Wk12", "Wk16")
+dds_list <- list()   # store full DESeqDataSet for each time point
+
+for(tp in timepoints) {
+  # Subset samples for current time point
+  # samples_to_keep <- sample_data(ps)$timepoint %in% c("Day1", tp)
+  samples_to_keep <- sample_data(ps)$timepoint %in% c(tp)
+  ps_sub <- prune_samples(samples_to_keep, ps)
+
+  # Convert variables to factors
+  sample_data(ps_sub)$treatment <- factor(sample_data(ps_sub)$treatment, levels = c("placebo", "active"))
+  # sample_data(ps_sub)$time <- factor(sample_data(ps_sub)$timepoint, levels = c("Day1", tp))
+
+  # Convert to DESeq2 object
+  dds_sub <- phyloseq_to_deseq2(ps_sub, ~ treatment)
+
+  # Run DESeq
+  dds_sub <- DESeq(dds_sub)
+
+  # Store full results object
+  dds_list[[tp]] <- dds_sub
+}
+
+for(tp in names(dds_list)) {
+  dds_sub <- dds_list[[tp]]
+
+  # Extract results
+  res_df <- as.data.frame(results(dds_sub))
+  res_df$ASV <- rownames(res_df)
+}
