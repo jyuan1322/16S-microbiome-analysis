@@ -85,87 +85,8 @@ seqtab.filt2 <- seqtab.filt[, colnames(seqtab.filt) %in%
 seqtab.filt2 <- seqtab.filt2[, colSums(seqtab.filt2) > 0]
 taxa_filtered <- taxa_filtered[colnames(seqtab.filt2), , drop = FALSE]
 
-
-# Convert counts to relative abundance per sample
-rel_abund <- sweep(seqtab.filt2, 1, rowSums(seqtab.filt2), FUN = "/")
-
-# Get 2nd highest relative abundance per ASV
-second_highest <- apply(rel_abund, 2, function(x) {
-  sort(x, decreasing = TRUE)[2]  # second largest value
-})
-
-# Build data frame for plotting
-df_elbow <- data.frame(
-  ASV = names(second_highest),
-  second_highest = second_highest
-) %>%
-  arrange(desc(second_highest)) %>%
-  mutate(rank = row_number())
-
-# Elbow plot
-p1 <- ggplot(df_elbow, aes(x = rank, y = second_highest)) +
-  geom_line() +
-  geom_point(size = 0.8) +
-  geom_hline(yintercept = 0.001, linetype = "dashed", color = "red") +
-  theme_bw() +
-  labs(x = "ASV Rank", y = "Second-highest relative abundance",
-       title = "Elbow plot for ASV filtering")
-ggsave("dada2_filtering_elbow_second_abund.pdf", plot = p1, width = 6, height = 4)
-p1 <- ggplot(df_elbow, aes(x = rank, y = second_highest)) +
-  geom_line() +
-  geom_point(size = 0.8) +
-  geom_hline(yintercept = 0.001, linetype = "dashed", color = "red") +
-  scale_y_log10() +
-  theme_bw() +
-  labs(x = "ASV Rank", y = "Second-highest relative abundance (log scale)",
-       title = "Elbow plot for ASV filtering")
-ggsave("dada2_filtering_elbow_second_abund_log.pdf", plot = p1, width = 6, height = 4)
-
-
-# Prevalence = number of samples with nonzero abundance
-prevalence <- colSums(seqtab.filt2 > 0)
-
-# Total abundance = sum across all samples
-total_abundance <- colSums(seqtab.filt2)
-
-# ---- Prevalence elbow plot ----
-prev_df <- data.frame(
-  ASV = colnames(seqtab.filt2),
-  prevalence = prevalence
-) %>%
-  arrange(desc(prevalence)) %>%
-  mutate(rank = row_number())
-
-p2 <- ggplot(prev_df, aes(x = rank, y = prevalence)) +
-  geom_line() +
-  geom_point(size = 0.5) +
-  theme_bw() +
-  labs(x = "ASVs (ranked)", y = "Prevalence (# samples)")
-ggsave("dada2_filtering_elbow_prev.pdf", plot = p2, width = 6, height = 4)
-
-# ---- Total abundance elbow plot ----
-abund_df <- data.frame(
-  ASV = colnames(seqtab.filt2),
-  total_abundance = total_abundance
-) %>%
-  arrange(desc(total_abundance)) %>%
-  mutate(rank = row_number())
-
-p3 <- ggplot(abund_df, aes(x = rank, y = total_abundance)) +
-  geom_line() +
-  geom_point(size = 0.5) +
-  theme_bw() +
-  labs(x = "ASVs (ranked)", y = "Total abundance (reads)")
-ggsave("dada2_filtering_elbow_total_count.pdf", plot = p3, width = 6, height = 4)
-p3 <- ggplot(abund_df, aes(x = rank, y = total_abundance)) +
-  geom_line() +
-  geom_point(size = 0.5) +
-  scale_y_log10() +   # log-scale helps spread rare ASVs
-  theme_bw() +
-  labs(x = "ASVs (ranked)", y = "Total abundance (reads)")
-ggsave("dada2_filtering_elbow_total_count_log.pdf", plot = p3, width = 6, height = 4)
-
-
+# plot elbow plots (from utils.R)
+plot_qc_elbow(seqtab_filtered)
 
 
 # # total counts per ASV (across all samples)
@@ -364,60 +285,12 @@ dev.off()
 
 
 
-
-
-
-# Select top N most abundant ASVs
-asv_abundance <- colSums(seqtab.filt4)
-top_common_asvs <- names(sort(asv_abundance, decreasing = TRUE))[1:50]
-seqtab.filt5 <- seqtab.filt4[, top_common_asvs]
-
-# Extract the ASV sequences from column names
-asv_seqs <- colnames(seqtab.filt5)
-# Run your get_asv_id function on each sequence (vectorized with sapply)
-asv_ids_mapped <- sapply(asv_seqs, get_asv_id)
-# Replace colnames with the mapped IDs (or NA if no match)
-colnames(seqtab.filt5) <- asv_ids_mapped
-
-
-# reorder time points numerically
-rn <- rownames(seqtab.filt5)
-# Extract subject (everything before 'Day' or 'Wk')
-subject <- sub("(Day|Wk).*", "", rn)
-# Extract timepoint (e.g. Day1, Wk12)
-timepoint <- sub(".*(Day\\d+|Wk\\d+).*", "\\1", rn)
-# Convert timepoint to numeric days (hardcoded)
-time_numeric <- numeric(length(timepoint))
-day_idx <- grepl("Day", timepoint)
-wk_idx <- grepl("Wk", timepoint)
-time_numeric[day_idx] <- as.numeric(sub("Day", "", timepoint[day_idx]))
-time_numeric[wk_idx] <- as.numeric(sub("Wk", "", timepoint[wk_idx])) * 7
-
-# Create ordering index by subject, then time_numeric
-ord <- order(subject, time_numeric)
-# Reorder your table
-seqtab.filt5_ordered <- seqtab.filt5[ord, ]
-
-ht <- plot_asv_heatmap(seqtab.filt5_ordered,
-                      meta_sub,
-                      min_abundance = 0,
-                      min_prevalence = 0,
-                      rel_abund = TRUE,
-                      cluster_rows = TRUE,
-                      cluster_cols = FALSE)
-pdf(file.path(working_dir, dada2_figure_out, "fig2_common_asvs_heatmap.pdf"),
-    width = 12, height = 6)
-draw(ht, heatmap_legend_side = "bottom")
-dev.off()
-
-
-
 # ---------- Alpha Diversity Analysis ----------
 # Alpha diversity using filtered ASVs (seqtab.filt3)
 # seqtab.filt2 has only removal of unassigned ASVs (no read count or prevalence filtering)
-# seqtab_obj <- seqtab.filt2
-seqtab_obj <- seqtab.filt3
-sample_order <- rownames(seqtab_obj)
+# seqtab_to_use <- seqtab.filt2
+seqtab_to_use <- seqtab.filt3
+sample_order <- rownames(seqtab_to_use)
 meta_all <- meta_sub[match(sample_order, meta_sub$sample_id), ]
 rownames(meta_all) <- meta_all$sample_id
 missing_ids <- setdiff(sample_order, meta_all$sample_id)
@@ -425,7 +298,7 @@ if (length(missing_ids) > 0) {
   warning("Some sample IDs not found in df: ", paste(missing_ids, collapse = ", "))
 }
 print("checking meta row order alignment")
-all(rownames(seqtab_obj) == meta_all$sample_id)
+all(rownames(seqtab_to_use) == meta_all$sample_id)
 
 taxa <- read.csv(file.path(working_dir, dada2_data_out, "taxa.csv"), sep=' ')
 taxa <- as.matrix(taxa)
@@ -436,10 +309,10 @@ taxa <- as.matrix(taxa)
 # Step 3: Subset the taxonomy table using the ASV sequences
 # taxa_filtered <- taxa[asv_seqs5, , drop = FALSE]
 # rownames(taxa_filtered) <- asv_ids[asv_seqs5]
-taxa_filtered <- taxa[colnames(seqtab_obj), , drop = FALSE]
+taxa_filtered <- taxa[colnames(seqtab_to_use), , drop = FALSE]
 print("checking taxa row order alignment")
-all(colnames(seqtab_obj) == rownames(taxa_filtered))
-ps <- phyloseq(otu_table(seqtab_obj, taxa_are_rows=FALSE),
+all(colnames(seqtab_to_use) == rownames(taxa_filtered))
+ps <- phyloseq(otu_table(seqtab_to_use, taxa_are_rows=FALSE),
                sample_data(meta_all),
                tax_table(taxa_filtered))
 
@@ -680,14 +553,6 @@ do.call(rbind, lapply(treatment_comparisons, as.data.frame))
 # 4 Wk16 0.1166667
 # 5  Wk8 0.9272727
 # 6  Wk4 0.9142857
-# Observed
-#     tp          p
-# 1 Day1 0.48706415
-# 2  Wk1 0.03791764
-# 3 Wk12 0.64848485
-# 4 Wk16 0.51666667
-# 5  Wk8 0.78787879
-# 6  Wk4 0.60952381
 
 
 # Find pairs of successive timepoints
@@ -718,18 +583,6 @@ do.call(rbind, lapply(timepoint_comparisons, as.data.frame))
 # 8  placebo  Wk4  Wk8 0.6857143
 # 9  placebo  Wk8 Wk12 0.6857143
 # 10 placebo Wk12 Wk16 0.1142857
-# Observed
-#        trt  tp1  tp2         p
-# 1   active Day1  Wk1 0.6943279
-# 2   active  Wk1  Wk4 0.4135864
-# 3   active  Wk4  Wk8 0.5337995
-# 4   active  Wk8 Wk12 0.6200466
-# 5   active Wk12 Wk16 0.6200466
-# 6  placebo Day1  Wk1 0.2786325
-# 7  placebo  Wk1  Wk4 0.8649006
-# 8  placebo  Wk4  Wk8 0.6857143
-# 9  placebo  Wk8 Wk12 1.0000000
-# 10 placebo Wk12 Wk16 1.0000000
 
 
 
@@ -900,144 +753,6 @@ dev.off()
 #
 # ---------- Differential abundance analysis ----------
 #
-
-# DESeq2 to identify differentially abundant ASVs
-# Create DESeq2 dataset
-# standard normalize the numeric time (days)
-library(DESeq2)
-library(apeglm)
-sample_data(ps)$time_numeric_scaled <- scale(sample_data(ps)$time_numeric, center = TRUE, scale = TRUE)
-# set treatment to factor with levels
-sample_data(ps)$treatment <- factor(sample_data(ps)$treatment, levels = c("placebo", "active"))
-
-deseq_data <- phyloseq_to_deseq2(ps, ~ treatment * time_numeric_scaled)
-# # Estimate size factors (this is typically done automatically in DESeq2)
-# deseq_data <- estimateSizeFactors(deseq_data)
-# Run DESeq2
-deseq_data <- DESeq(deseq_data)
-# Results for treatment effect
-res_treatment <- results(deseq_data, contrast = c("treatment", "active", "placebo"))
-# Results for time point effect
-res_timepoint <- results(deseq_data, name = "time_point_Wk1_vs_Day1")
-# Results for interaction effect
-res_interaction <- results(deseq_data, name = "treatmentactive.time_pointWk1_vs_Day1")
-# Filter results for significant ASVs
-sig_asvs_treatment <- res_treatment[which(res_treatment$padj < 0.05), ]
-sig_asvs_timepoint <- res_timepoint[which(res_timepoint$padj < 0.05), ]
-sig_asvs_interaction <- res_interaction[which(res_interaction$padj < 0.05), ]
-
-
-# NOTE: try limma-voom instead
-# DESeq2 does not accommodate subject_id as a random effect
-# But it should be ignored either: DESeq2 does not assume independence of samples
-library(edgeR)
-library(limma)
-library(phyloseq)
-
-# Get raw counts (taxa x samples)
-counts <- as(otu_table(ps), "matrix")
-if (taxa_are_rows(ps)) {
-  counts <- counts
-} else {
-  counts <- t(counts)
-}
-
-# Sample metadata
-meta <- data.frame(sample_data(ps))
-dge <- DGEList(counts = counts)
-dge <- calcNormFactors(dge)
-
-meta$treatment <- factor(meta$treatment, levels = c("placebo", "active"))
-meta$time_numeric_scaled <- scale(meta$time_numeric)
-meta$subject_id <- factor(meta$subject_id)
-
-design <- model.matrix(~ treatment * time_numeric_scaled, data = meta)
-
-# First pass to estimate subject-level correlation
-v <- voom(dge, design, plot = TRUE)
-corfit <- duplicateCorrelation(v, design, block = meta$subject_id)
-print(corfit$consensus)  # correlation between repeated measures
-
-# Second pass with block and correlation
-v <- voom(dge, design, block = meta$subject_id, correlation = corfit$consensus, plot = TRUE)
-
-fit <- lmFit(v, design, block = meta$subject_id, correlation = corfit$consensus)
-fit <- eBayes(fit)
-
-# Main treatment effect at mean time
-top_treatment <- topTable(fit, coef = "treatmentactive", number = Inf)
-
-# Main effect of time (in placebo)
-top_time <- topTable(fit, coef = "time_numeric_scaled", number = Inf)
-
-# Interaction: difference in time slope between active and placebo
-top_interaction <- topTable(fit, coef = "treatmentactive:time_numeric_scaled", number = Inf)
-top_interaction$asv_seq <- rownames(top_interaction)
-top_interaction <- top_interaction %>%
-  rowwise() %>%
-  mutate(asv_id = get_asv_id(asv_seq)) %>%
-  ungroup() %>%
-  as.data.frame()
-rownames(top_interaction) <- top_interaction$asv_id
-
-plotMA(fit, coef = "treatmentactive:time_numeric_scaled")
-
-write.csv(top_interaction, file.path(working_dir, dada2_data_out, "limma_voom_interaction_results.csv"))
-saveRDS(fit, file.path(working_dir, dada2_data_out, "limma_voom_fit.rds"))
-
-# get top 50 DE ASVs for plotting with heatmap
-# Force all columns to basic atomic vectors (even if nested Rle or lists)
-top50 <- top_interaction %>%
-  as.data.frame() %>%
-  arrange(adj.P.Val) %>%   # Replace with actual column name
-  dplyr::slice(1:50)
-
-# Select top N most abundant ASVs
-seqtab.filt6 <- seqtab.filt2[, top50$asv_seq]
-
-# Extract the ASV sequences from column names
-asv_seqs <- colnames(seqtab.filt6)
-# Run your get_asv_id function on each sequence (vectorized with sapply)
-asv_ids_mapped <- sapply(asv_seqs, get_asv_id)
-# Replace colnames with the mapped IDs (or NA if no match)
-colnames(seqtab.filt6) <- asv_ids_mapped
-
-
-# reorder time points numerically
-rn <- rownames(seqtab.filt6)
-# Extract subject (everything before 'Day' or 'Wk')
-subject <- sub("(Day|Wk).*", "", rn)
-# Extract timepoint (e.g. Day1, Wk12)
-timepoint <- sub(".*(Day\\d+|Wk\\d+).*", "\\1", rn)
-# Convert timepoint to numeric days (hardcoded)
-time_numeric <- numeric(length(timepoint))
-day_idx <- grepl("Day", timepoint)
-wk_idx <- grepl("Wk", timepoint)
-time_numeric[day_idx] <- as.numeric(sub("Day", "", timepoint[day_idx]))
-time_numeric[wk_idx] <- as.numeric(sub("Wk", "", timepoint[wk_idx])) * 7
-
-# Create ordering index by subject, then time_numeric
-ord <- order(subject, time_numeric)
-# Reorder your table
-seqtab.filt6_ordered <- seqtab.filt6[ord, ]
-
-ht <- plot_asv_heatmap(seqtab.filt6_ordered,
-                    meta_sub,
-                    min_abundance = 0,
-                    min_prevalence = 0,
-                    rel_abund = TRUE,
-                    cluster_rows = TRUE,
-                    cluster_cols = FALSE)
-pdf(file.path(working_dir, dada2_figure_out, "fig2_DE_asvs_heatmap.pdf"),
-    width = 12, height = 6)
-draw(ht, heatmap_legend_side = "bottom")
-dev.off()
-
-
-
-
-
-
 
 
 # Alternate: run DESeq2 pairwise
@@ -1284,68 +999,6 @@ seqtab.filt4 <- seqtab.filt3[, keep_asvs]
 
 
 
-# testing other models
-sample_data(ps)
-otu_table(ps)
-
-# Load packages
-# library(microbiome)   # for CLR transform
-library(caret)        # for ML workflow
-library(dplyr)
-
-# --- Example inputs ---
-# counts: rows = samples, cols = OTUs
-# metadata: rows = samples, includes column "treatment"
-counts <- otu_table(ps)
-metadata <- sample_data(ps)
-
-# 1. Add pseudocount and CLR-transform
-# counts: samples x OTUs
-counts_pseudo <- counts + 1  # add pseudocount to avoid log(0)
-# Compute CLR
-counts_clr <- t(apply(counts_pseudo, 1, function(x) {
-  log_x <- log(x)
-  log_x - mean(log_x)  # subtract geometric mean (actually mean of logs)
-}))
-
-# 2. Combine with metadata
-data_ml <- cbind(metadata[, c("subject_id", "treatment")], counts_clr)
-
-# 3. Example: split predictors (X) and response (y)
-X <- data_ml %>% select(-treatment)
-y <- data_ml$treatment
-
-# 4. Train/test split
-set.seed(123)
-train_idx <- createDataPartition(y, p = 0.8, list = FALSE)
-X_train <- X[train_idx, ]
-y_train <- factor(y[train_idx], levels = c("placebo", "active")) 
-X_test  <- X[-train_idx, ]
-y_test  <- factor(y[-train_idx], levels = c("placebo", "active"))
-
-# 5. Example model: Random Forest
-model <- train(
-  x = X_train,
-  y = y_train,
-  method = "rf",
-  trControl = trainControl(method = "cv", number = 5)
-)
-
-
-levels_y <- levels(y_train)  # all levels from training set
-
-# Convert predictions and true labels to factors with same levels
-preds <- factor(preds, levels = levels_y)
-y_test <- factor(y_test, levels = levels_y)
-
-# 6. Predict on test set
-preds <- predict(model, X_test)
-confusionMatrix(preds, y_test, positive="active")
-
-
-
-
-
 
 
 
@@ -1388,3 +1041,5 @@ for(tp in names(dds_list)) {
   res_df <- as.data.frame(results(dds_sub))
   res_df$ASV <- rownames(res_df)
 }
+
+

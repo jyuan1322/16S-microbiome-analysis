@@ -436,3 +436,87 @@ plot_asv_heatmap2 <- function(seqtab_filtered,
 
     return(gg)
 }
+
+
+
+
+plot_qc_elbow <- function(seqtab_filtered) {
+  # Convert counts to relative abundance per sample
+  rel_abund <- sweep(seqtab_filtered, 1, rowSums(seqtab_filtered), FUN = "/")
+
+  # Get 2nd highest relative abundance per ASV
+  second_highest <- apply(rel_abund, 2, function(x) {
+    sort(x, decreasing = TRUE)[2]  # second largest value
+  })
+
+  # Build data frame for plotting
+  df_elbow <- data.frame(
+    ASV = names(second_highest),
+    second_highest = second_highest
+  ) %>%
+    arrange(desc(second_highest)) %>%
+    mutate(rank = row_number())
+
+  # Elbow plot
+  p1 <- ggplot(df_elbow, aes(x = rank, y = second_highest)) +
+    geom_line() +
+    geom_point(size = 0.8) +
+    geom_hline(yintercept = 0.001, linetype = "dashed", color = "red") +
+    theme_bw() +
+    labs(x = "ASV Rank", y = "Second-highest relative abundance",
+        title = "Elbow plot for ASV filtering")
+  ggsave("dada2_filtering_elbow_second_abund.pdf", plot = p1, width = 6, height = 4)
+  p1 <- ggplot(df_elbow, aes(x = rank, y = second_highest)) +
+    geom_line() +
+    geom_point(size = 0.8) +
+    geom_hline(yintercept = 0.001, linetype = "dashed", color = "red") +
+    scale_y_log10() +
+    theme_bw() +
+    labs(x = "ASV Rank", y = "Second-highest relative abundance (log scale)",
+        title = "Elbow plot for ASV filtering")
+  ggsave("dada2_filtering_elbow_second_abund_log.pdf", plot = p1, width = 6, height = 4)
+
+  # Prevalence = number of samples with nonzero abundance
+  prevalence <- colSums(seqtab_filtered > 0)
+
+  # Total abundance = sum across all samples
+  total_abundance <- colSums(seqtab_filtered)
+
+  # ---- Prevalence elbow plot ----
+  prev_df <- data.frame(
+    ASV = colnames(seqtab_filtered),
+    prevalence = prevalence
+  ) %>%
+    arrange(desc(prevalence)) %>%
+    mutate(rank = row_number())
+
+  p2 <- ggplot(prev_df, aes(x = rank, y = prevalence)) +
+    geom_line() +
+    geom_point(size = 0.5) +
+    theme_bw() +
+    labs(x = "ASVs (ranked)", y = "Prevalence (# samples)")
+  ggsave("dada2_filtering_elbow_prev.pdf", plot = p2, width = 6, height = 4)
+
+  # ---- Total abundance elbow plot ----
+  abund_df <- data.frame(
+    ASV = colnames(seqtab_filtered),
+    total_abundance = total_abundance
+  ) %>%
+    arrange(desc(total_abundance)) %>%
+    mutate(rank = row_number())
+
+  p3 <- ggplot(abund_df, aes(x = rank, y = total_abundance)) +
+    geom_line() +
+    geom_point(size = 0.5) +
+    theme_bw() +
+    labs(x = "ASVs (ranked)", y = "Total abundance (reads)")
+  ggsave("dada2_filtering_elbow_total_count.pdf", plot = p3, width = 6, height = 4)
+  p3 <- ggplot(abund_df, aes(x = rank, y = total_abundance)) +
+    geom_line() +
+    geom_point(size = 0.5) +
+    scale_y_log10() +   # log-scale helps spread rare ASVs
+    theme_bw() +
+    labs(x = "ASVs (ranked)", y = "Total abundance (reads)")
+  ggsave("dada2_filtering_elbow_total_count_log.pdf", plot = p3, width = 6, height = 4)
+
+}
